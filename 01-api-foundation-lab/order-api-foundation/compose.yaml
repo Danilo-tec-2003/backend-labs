@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: order-api-foundation-postgres
+    environment:
+      POSTGRES_DB: order_api_foundation
+      POSTGRES_USER: order_user
+      POSTGRES_PASSWORD: order_password
+    ports:
+      - "5433:5432"
+    volumes:
+      - order_api_foundation_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U order_user -d order_api_foundation"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  order_api_foundation_pgdata:
