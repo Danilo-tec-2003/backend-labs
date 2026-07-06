@@ -7,14 +7,14 @@ import static org.junit.jupiter.api.Assertions.*;
 class EmailTest {
 
     @Test
-    void deveCriarEmailValidoNormalizado() {
+    void shouldCreateNormalizedValidEmail() {
         Email email = Email.of(" Danilo@GMAIL.com ");
 
         assertEquals("danilo@gmail.com", email.value());
     }
 
     @Test
-    void deveCompararEmailsPeloValor() {
+    void shouldCompareEmailsByValue() {
         Email email1 = Email.of(" Danilo@GMAIL.com ");
         Email email2 = Email.of("danilo@gmail.com");
 
@@ -23,20 +23,20 @@ class EmailTest {
     }
 
     @Test
-    void naoDeveCriarEmailNuloOuVazio() {
+    void shouldNotCreateBlankEmail() {
         assertThrows(IllegalArgumentException.class, () -> Email.of(null));
         assertThrows(IllegalArgumentException.class, () -> Email.of(""));
         assertThrows(IllegalArgumentException.class, () -> Email.of("   "));
     }
 
     @Test
-    void naoDeveCriarEmailInvalido() {
+    void shouldNotCreateInvalidEmail() {
         assertThrows(IllegalArgumentException.class, () -> Email.of("danilo"));
         assertThrows(IllegalArgumentException.class, () -> Email.of("danilo@gmail"));
     }
 
     @Test
-    void deveRetornarEmailNoToString() {
+    void shouldReturnEmailInToString() {
         Email email = Email.of("danilo@gmail.com");
 
         assertEquals("danilo@gmail.com", email.toString());

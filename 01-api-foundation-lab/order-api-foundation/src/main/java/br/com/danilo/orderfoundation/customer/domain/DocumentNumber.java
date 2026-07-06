@@ -12,12 +12,12 @@ public class DocumentNumber {
 
     public static DocumentNumber of(String rawValue) {
         if (rawValue == null || rawValue.isBlank()) {
-            throw new IllegalArgumentException("O número do documento é obrigatório.");
+            throw new IllegalArgumentException("Document number is required.");
         }
 
         String normalized = rawValue.replaceAll("\\D", "");
         if (normalized.length() != 11 && normalized.length() != 14) {
-            throw new IllegalArgumentException("O número do documento deve ter 11 ou 14 dígitos.");
+            throw new IllegalArgumentException("Document number must have 11 or 14 digits.");
         }
 
         return new DocumentNumber(normalized);

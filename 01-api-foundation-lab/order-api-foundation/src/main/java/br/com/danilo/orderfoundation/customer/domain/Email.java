@@ -15,12 +15,12 @@ public class Email {
 
     public static Email of(String rawValue) {
         if (rawValue == null || rawValue.isBlank()) {
-            throw new IllegalArgumentException("O e-mail é obrigatório.");
+            throw new IllegalArgumentException("Email is required.");
         }
 
         String normalized = rawValue.trim().toLowerCase();
         if (!EMAIL_PATTERN.matcher(normalized).matches()) {
-            throw new IllegalArgumentException("O e-mail é inválido.");
+            throw new IllegalArgumentException("Email is invalid.");
         }
 
         return new Email(normalized);
