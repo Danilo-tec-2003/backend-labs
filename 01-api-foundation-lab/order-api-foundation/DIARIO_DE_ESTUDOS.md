@@ -16,13 +16,17 @@ Ele serve como guia de desenvolvimento para entender o que foi feito, por que fo
 - [8. Dominio](#8-dominio)
 - [9. Application](#9-application)
 - [10. Infrastructure Persistence](#10-infrastructure-persistence)
-- [11. Testes](#11-testes)
-- [12. Perguntas e Respostas de Arquitetura](#12-perguntas-e-respostas-de-arquitetura)
-- [13. Como Criar Uma Nova Feature Seguindo Este Padrao](#13-como-criar-uma-nova-feature-seguindo-este-padrao)
-- [14. Checklist de Qualidade](#14-checklist-de-qualidade)
-- [15. Comandos Uteis](#15-comandos-uteis)
-- [16. Commits Feitos e Intencao](#16-commits-feitos-e-intencao)
-- [17. Proximos Passos](#17-proximos-passos)
+- [11. API HTTP](#11-api-http)
+- [12. Tratamento Global de Erros](#12-tratamento-global-de-erros)
+- [13. Padrao de Mensagens](#13-padrao-de-mensagens)
+- [14. Testes](#14-testes)
+- [15. Perguntas e Respostas de Arquitetura](#15-perguntas-e-respostas-de-arquitetura)
+- [16. Como Criar Uma Nova Feature Seguindo Este Padrao](#16-como-criar-uma-nova-feature-seguindo-este-padrao)
+- [17. Checklist de Qualidade](#17-checklist-de-qualidade)
+- [18. Comandos Uteis](#18-comandos-uteis)
+- [19. Testando no Postman](#19-testando-no-postman)
+- [20. Commits Feitos e Intencao](#20-commits-feitos-e-intencao)
+- [21. Proximos Passos](#21-proximos-passos)
 
 ## 1. Objetivo do Projeto
 
@@ -49,7 +53,11 @@ O primeiro fluxo implementado foi:
 criar cliente
 ```
 
-Ainda nao existe endpoint HTTP. O projeto ja possui dominio, caso de uso, migration e adapter JPA para persistencia.
+O projeto ja possui o fluxo basico completo:
+
+```text
+HTTP -> API -> Application -> Domain -> Infrastructure -> PostgreSQL
+```
 
 ## 2. Stack Usada
 
@@ -85,6 +93,9 @@ Estrutura atual do modulo `customer`:
 ```text
 src/main/java/br/com/danilo/orderfoundation/customer
 |-- api
+|   |-- CreateCustomerRequest.java
+|   |-- CustomerController.java
+|   `-- CustomerResponse.java
 |-- application
 |   |-- CreateCustomerCommand.java
 |   |-- CreateCustomerUseCase.java
@@ -99,6 +110,14 @@ src/main/java/br/com/danilo/orderfoundation/customer
         |-- CustomerJpaEntity.java
         |-- JpaCustomerRepository.java
         `-- SpringDataCustomerRepository.java
+```
+
+Tambem existe uma area compartilhada para erros da API:
+
+```text
+src/main/java/br/com/danilo/orderfoundation/shared/api/error
+|-- ApiError.java
+`-- GlobalExceptionHandler.java
 ```
 
 Visao do fluxo entre camadas:
@@ -200,9 +219,9 @@ Essa camada sabe:
 
 ### `api`
 
-Ainda nao foi implementada.
+Responsavel por expor o sistema para o mundo externo via HTTP.
 
-No proximo ciclo, ela tera:
+No projeto atual:
 
 ```text
 CreateCustomerRequest
@@ -212,46 +231,51 @@ CustomerController
 
 Essa camada sera responsavel por:
 
-- receber HTTP;
-- validar request com Bean Validation;
-- transformar request em command;
-- chamar use case;
-- transformar dominio em response;
-- retornar status HTTP correto.
+- recebe HTTP;
+- valida request com Bean Validation;
+- transforma request em command;
+- chama use case;
+- transforma dominio em response;
+- retorna status HTTP correto.
+
+Ela nao deve acessar Spring Data repository diretamente.
 
 ## 5. Fluxo Atual do Modulo Customer
 
-Fluxo logico do caso de uso:
-
-```text
-CreateCustomerCommand
-    -> CreateCustomerUseCase
-        -> Email.of(...)
-        -> DocumentNumber.of(...)
-        -> CustomerRepository.existsByEmail(...)
-        -> CustomerRepository.existsByDocument(...)
-        -> Customer.create(...)
-        -> CustomerRepository.save(...)
-            -> JpaCustomerRepository
-                -> CustomerJpaEntity
-                -> SpringDataCustomerRepository
-                -> PostgreSQL
-```
-
-Ainda falta o inicio HTTP:
+Fluxo completo atual:
 
 ```text
 POST /api/v1/customers
-```
-
-Quando a API for criada, o fluxo completo ficara:
-
-```text
-HTTP Request
     -> CustomerController
         -> CreateCustomerRequest
         -> CreateCustomerCommand
         -> CreateCustomerUseCase
+            -> Email.of(...)
+            -> DocumentNumber.of(...)
+            -> CustomerRepository.existsByEmail(...)
+            -> CustomerRepository.existsByDocument(...)
+            -> Customer.create(...)
+            -> CustomerRepository.save(...)
+                -> JpaCustomerRepository
+                    -> CustomerJpaEntity
+                    -> SpringDataCustomerRepository
+                    -> PostgreSQL
+        -> CustomerResponse
+```
+
+Resumo por responsabilidade:
+
+```text
+Controller              = entrada HTTP
+Request                 = dados recebidos da API
+Command                 = dados de entrada do caso de uso
+UseCase                 = orquestracao da regra
+Domain                  = regras centrais e objetos validos
+Repository Port         = contrato da aplicacao
+JPA Adapter             = implementacao concreta da persistencia
+Spring Data Repository  = acesso tecnico ao banco
+Response                = dados devolvidos pela API
+```
         -> CustomerRepository
         -> PostgreSQL
         -> CustomerResponse
@@ -690,7 +714,230 @@ Customer
 
 Esse adapter e o ponto onde a arquitetura se conecta ao banco real.
 
-## 11. Testes
+## 11. API HTTP
+
+### `CreateCustomerRequest`
+
+Arquivo:
+
+```text
+customer/api/CreateCustomerRequest.java
+```
+
+Responsabilidade:
+
+- representar o JSON recebido pela API;
+- validar campos com Bean Validation;
+- ficar restrito a camada `api`.
+
+Atual:
+
+```java
+public record CreateCustomerRequest(
+        @NotBlank(message = "Name is required")
+        @Size(max = 120, message = "Name must have at most 120 characters")
+        String name,
+
+        @NotBlank(message = "Email is required")
+        @Email(message = "Email is invalid")
+        @Size(max = 180, message = "Email must have at most 180 characters")
+        String email,
+
+        @NotBlank(message = "Document is required")
+        @Size(max = 20, message = "Document must have at most 20 characters")
+        String document
+) {
+}
+```
+
+Por que existe request se ja existe command?
+
+Porque eles pertencem a camadas diferentes.
+
+```text
+CreateCustomerRequest = contrato HTTP
+CreateCustomerCommand = entrada do caso de uso
+```
+
+Se a API mudar, o command nao precisa mudar automaticamente.
+
+### `CustomerResponse`
+
+Arquivo:
+
+```text
+customer/api/CustomerResponse.java
+```
+
+Responsabilidade:
+
+- representar o JSON devolvido pela API;
+- esconder detalhes internos do dominio;
+- controlar exatamente quais campos saem na resposta.
+
+Ele possui um factory method:
+
+```java
+public static CustomerResponse from(Customer customer)
+```
+
+Esse metodo converte:
+
+```text
+Customer -> CustomerResponse
+```
+
+### `CustomerController`
+
+Arquivo:
+
+```text
+customer/api/CustomerController.java
+```
+
+Responsabilidade:
+
+- receber `POST /api/v1/customers`;
+- aplicar validacao da request;
+- criar `CreateCustomerCommand`;
+- chamar `CreateCustomerUseCase`;
+- retornar `CustomerResponse`;
+- responder `201 Created` em caso de sucesso.
+
+Fluxo do controller:
+
+```text
+request JSON
+    -> CreateCustomerRequest
+        -> CreateCustomerCommand
+            -> CreateCustomerUseCase
+                -> Customer
+                    -> CustomerResponse
+```
+
+O controller nao deve:
+
+- acessar repository diretamente;
+- conter regra de negocio;
+- converter para entidade JPA;
+- executar SQL;
+- decidir duplicidade de email/documento.
+
+## 12. Tratamento Global de Erros
+
+### `ApiError`
+
+Arquivo:
+
+```text
+shared/api/error/ApiError.java
+```
+
+Responsabilidade:
+
+- padronizar resposta de erro da API;
+- evitar respostas diferentes para cada controller;
+- facilitar consumo por clientes HTTP.
+
+Formato:
+
+```java
+public record ApiError(
+        Instant timestamp,
+        int status,
+        String error,
+        List<String> messages,
+        String path
+) {
+}
+```
+
+Exemplo:
+
+```json
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 400,
+  "error": "Bad Request",
+  "messages": [
+    "Customer email already exists."
+  ],
+  "path": "/api/v1/customers"
+}
+```
+
+### `GlobalExceptionHandler`
+
+Arquivo:
+
+```text
+shared/api/error/GlobalExceptionHandler.java
+```
+
+Responsabilidade:
+
+- capturar excecoes comuns;
+- transformar excecoes em resposta HTTP padronizada;
+- evitar `try/catch` repetido nos controllers.
+
+Tratamentos atuais:
+
+```text
+IllegalArgumentException        -> 400 Bad Request
+MethodArgumentNotValidException -> 400 Bad Request
+```
+
+`IllegalArgumentException` cobre erros de dominio/application, como:
+
+```text
+Customer email already exists.
+Document number must have 11 or 14 digits.
+```
+
+`MethodArgumentNotValidException` cobre erros de Bean Validation, como:
+
+```text
+Name is required
+Email is invalid
+```
+
+## 13. Padrao de Mensagens
+
+As mensagens da aplicacao foram padronizadas em ingles.
+
+Motivos:
+
+- manter consistencia tecnica;
+- facilitar leitura em logs;
+- seguir padrao comum em APIs;
+- evitar mistura de portugues e ingles no codigo.
+
+Exemplos:
+
+```text
+Email is required.
+Email is invalid.
+Document number is required.
+Document number must have 11 or 14 digits.
+Create customer command is required.
+Customer email already exists.
+Customer document already exists.
+```
+
+As mensagens de Bean Validation tambem foram explicitadas em ingles:
+
+```java
+@NotBlank(message = "Name is required")
+@Email(message = "Email is invalid")
+```
+
+Regra para os proximos modulos:
+
+```text
+nomes de classes, metodos, testes e mensagens tecnicas devem ficar em ingles
+```
+
+## 14. Testes
 
 Testes atuais:
 
@@ -742,7 +989,7 @@ existsByDocument(...)
 save(...)
 ```
 
-## 12. Perguntas e Respostas de Arquitetura
+## 15. Perguntas e Respostas de Arquitetura
 
 ### Qual e a diferenca entre `Customer.create(...)` e `Customer.restore(...)`?
 
@@ -818,7 +1065,7 @@ CreateCustomerUseCase
 CreateCustomerCommand
 ```
 
-## 13. Como Criar Uma Nova Feature Seguindo Este Padrao
+## 16. Como Criar Uma Nova Feature Seguindo Este Padrao
 
 Use este roteiro para criar novos modulos.
 
@@ -936,7 +1183,7 @@ docker compose up -d postgres
 ./mvnw spring-boot:run
 ```
 
-## 14. Checklist de Qualidade
+## 17. Checklist de Qualidade
 
 Antes de considerar uma feature pronta, confira:
 
@@ -953,7 +1200,7 @@ Antes de considerar uma feature pronta, confira:
 - [ ] aplicacao sobe com PostgreSQL.
 - [ ] commit tem escopo pequeno e claro.
 
-## 15. Comandos Uteis
+## 18. Comandos Uteis
 
 ### Selecionar Java do projeto
 
@@ -1018,7 +1265,102 @@ from flyway_schema_history;
 \q
 ```
 
-## 16. Commits Feitos e Intencao
+## 19. Testando no Postman
+
+Com a aplicacao rodando, crie uma request no Postman.
+
+Metodo:
+
+```text
+POST
+```
+
+URL:
+
+```text
+http://localhost:8080/api/v1/customers
+```
+
+Headers:
+
+```text
+Content-Type: application/json
+```
+
+Body:
+
+```json
+{
+  "name": "Danilo Mendes",
+  "email": "danilo.customer@example.com",
+  "document": "123.456.789-01"
+}
+```
+
+Resposta esperada:
+
+```text
+201 Created
+```
+
+Exemplo de response:
+
+```json
+{
+  "id": "uuid-gerado",
+  "name": "Danilo Mendes",
+  "email": "danilo.customer@example.com",
+  "document": "12345678901",
+  "status": "PENDING",
+  "createdAt": "2026-07-06T20:00:00Z"
+}
+```
+
+Se enviar a mesma request novamente, deve retornar:
+
+```text
+400 Bad Request
+```
+
+Exemplo:
+
+```json
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 400,
+  "error": "Bad Request",
+  "messages": [
+    "Customer email already exists."
+  ],
+  "path": "/api/v1/customers"
+}
+```
+
+Teste de validacao:
+
+```json
+{
+  "name": "",
+  "email": "invalid-email",
+  "document": ""
+}
+```
+
+Resultado esperado:
+
+```text
+400 Bad Request
+```
+
+Com mensagens vindas do Bean Validation:
+
+```text
+Name is required
+Email is invalid
+Document is required
+```
+
+## 20. Commits Feitos e Intencao
 
 ### `Add Spring Boot API foundation project`
 
@@ -1061,34 +1403,58 @@ Objetivo:
 conectar a porta CustomerRepository ao PostgreSQL via Spring Data JPA
 ```
 
-## 17. Proximos Passos
+### `Add customer API endpoint`
 
-Proximo ciclo recomendado:
+Criou:
+
+- `CreateCustomerRequest`;
+- `CustomerResponse`;
+- `CustomerController`;
+- `ApiError`;
+- `GlobalExceptionHandler`;
+- anotacao `@Service` em `CreateCustomerUseCase`.
+
+Objetivo:
 
 ```text
-POST /api/v1/customers
+expor POST /api/v1/customers e padronizar respostas de erro
 ```
 
-Arquivos esperados:
+### `Standardize customer messages in English`
+
+Padronizou:
+
+- mensagens de dominio;
+- mensagens de use case;
+- mensagens de Bean Validation;
+- nomes de testes que ainda estavam em portugues.
+
+Objetivo:
 
 ```text
-customer/api/CreateCustomerRequest.java
-customer/api/CustomerResponse.java
-customer/api/CustomerController.java
+manter API, codigo, testes e logs tecnicos consistentes em ingles
 ```
 
-O controller deve:
+## 21. Proximos Passos
 
-1. receber request HTTP;
-2. validar entrada;
-3. montar `CreateCustomerCommand`;
-4. chamar `CreateCustomerUseCase`;
-5. retornar `201 Created`;
-6. devolver `CustomerResponse`.
-
-Depois disso, o projeto tera o fluxo completo:
+O fluxo basico de `customer` esta praticamente fechado:
 
 ```text
 HTTP -> API -> Application -> Domain -> Infrastructure -> PostgreSQL
 ```
 
+Proximos passos recomendados:
+
+- criar teste de controller com MockMvc;
+- criar teste de integracao do adapter JPA;
+- criar endpoint `GET /api/v1/customers/{id}`;
+- criar endpoint `GET /api/v1/customers`;
+- melhorar erros de duplicidade com excecoes especificas;
+- adicionar location header no `POST /api/v1/customers`;
+- atualizar Swagger/OpenAPI com exemplos.
+
+Proximo ciclo mais recomendado:
+
+```text
+CustomerControllerTest com MockMvc
+```
