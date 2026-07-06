@@ -30,13 +30,13 @@ public class Customer {
 
     public static Customer create(String name, Email email, DocumentNumber document) {
         if (name == null || name.isBlank()) {
-            throw new IllegalArgumentException("O nome do cliente é obrigatório.");
+            throw new IllegalArgumentException("Customer name is required.");
         }
         if (email == null) {
-            throw new IllegalArgumentException("O e-mail do cliente é obrigatório.");
+            throw new IllegalArgumentException("Customer email is required.");
         }
         if (document == null) {
-            throw new IllegalArgumentException("O documento do cliente é obrigatório.");
+            throw new IllegalArgumentException("Customer document is required.");
         }
 
         return new Customer(
@@ -46,6 +46,42 @@ public class Customer {
                 document,
                 CustomerStatus.PENDING,
                 Instant.now()
+        );
+    }
+
+    public static Customer restore(
+            UUID id,
+            String name,
+            Email email,
+            DocumentNumber document,
+            CustomerStatus status,
+            Instant createdAt
+    ) {
+        if (id == null) {
+            throw new IllegalArgumentException("Customer id is required");
+        }
+        if (name == null || name.isBlank()) {
+            throw new IllegalArgumentException("Customer name is required");
+        }
+        if (email == null) {
+            throw new IllegalArgumentException("Customer email is required");
+        }
+        if (document == null) {
+            throw new IllegalArgumentException("Customer document is required");
+        }
+        if (status == null) {
+            throw new IllegalArgumentException("Customer status is required");
+        }
+        if (createdAt == null) {
+            throw new IllegalArgumentException("Customer creation date is required");
+        }
+        return new Customer(
+                id,
+                name.trim(),
+                email,
+                document,
+                status,
+                createdAt
         );
     }
 
