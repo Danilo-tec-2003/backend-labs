@@ -23,6 +23,12 @@ O erro que este roteiro evita e tentar aprender JWT, Kafka, testes, observabilid
 | 7 | `07-aws-cloud-lab` | IAM, VPC, ECS, RDS, S3, SQS e deploy controlado |
 | 8 | `08-go-worker-lab` | Go para workers, concorrencia, filas, HTTP e observabilidade |
 
+## Anotacoes
+
+| Tema | Foco |
+|---|---|
+| [`notes/microservices`](notes/microservices) | Microsservicos, transacoes distribuidas, consistencia, eventos e padroes arquiteturais |
+
 ## Como Usar
 
 Use um lab por vez. Nao abra todos ao mesmo tempo.
@@ -92,4 +98,3 @@ Um bom ritmo para quem trabalha ou estuda em paralelo:
 - AWS: 1 a 2 semanas, com cuidado de custo.
 
 Nao avance por ansiedade. Avance quando o criterio de pronto estiver cumprido.
-
