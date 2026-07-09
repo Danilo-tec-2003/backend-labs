@@ -228,15 +228,153 @@ Em bancos relacionais, isso pode ser feito dentro de uma transacao com `ROLLBACK
 
 ---
 
+## 4. Two-Phase Commit
+
+Two-Phase Commit, ou 2PC, e um protocolo de transacao distribuida usado para tentar garantir atomicidade em mais de um sistema.
+
+A ideia principal e: ou todos os participantes confirmam a transacao, ou todos desfazem.
+
+Ele funciona em duas fases.
+
+## Fase 1: preparacao ou votacao
+
+O coordenador da transacao pergunta para cada participante se ele consegue fazer o commit.
+
+Cada participante executa sua parte localmente, mas ainda nao finaliza. Depois responde:
+
+- `SIM`: estou pronto para confirmar;
+- `NAO`: nao consigo confirmar, precisa abortar.
+
+Enquanto isso, os recursos podem ficar bloqueados.
+
+## Fase 2: compromisso ou decisao
+
+Se todos responderem `SIM`, o coordenador manda todos fazerem `COMMIT`.
+
+Se algum responder `NAO`, o coordenador manda todos fazerem `ROLLBACK`.
+
+Isso tenta garantir que a operacao nao fique pela metade.
+
+## Exemplo simples
+
+```txt
+Coordenador
+  -> Pedido: pode confirmar?
+  -> Estoque: pode confirmar?
+  -> Pagamento: pode confirmar?
+
+Se todos responderem SIM:
+  -> COMMIT em todos
+
+Se algum responder NAO:
+  -> ROLLBACK em todos
+```
+
+Exemplo do mundo real:
+
+Uma compra online pode depender de pedido, estoque e pagamento. Se o pagamento falhar, o pedido e a reserva de estoque tambem precisam ser desfeitos.
+
+## Observacao sobre microsservicos
+
+2PC nao costuma ser a melhor escolha para microsservicos de alto volume, porque pode bloquear recursos e criar acoplamento forte entre servicos.
+
+Por isso, em muitos cenarios, outras abordagens sao preferidas:
+
+- Saga Pattern;
+- Outbox Pattern;
+- Event-Driven Architecture;
+- mensageria com Kafka ou RabbitMQ.
+
+---
+
+## 5. Saga Pattern
+
+Saga Pattern e um padrao usado para controlar uma operacao distribuida sem depender de uma unica transacao gigante.
+
+Em vez de fazer tudo dentro de uma transacao global, a Saga divide o processo em pequenas transacoes locais.
+
+Juntas, essas transacoes locais formam uma operacao maior.
+
+## Diferenca para Two-Phase Commit
+
+No Two-Phase Commit, se um servico falhar, o coordenador tenta fazer rollback em todos os participantes.
+
+No Saga Pattern, cada servico faz sua propria transacao local. Se algo der errado depois, o sistema executa uma transacao compensatoria.
+
+Transacao compensatoria e uma acao que desfaz ou compensa algo que ja foi feito.
+
+Exemplo:
+
+```txt
+1. Reserva voo
+2. Reserva hotel
+3. Reserva carro
+
+Se o hotel falhar:
+  -> cancelar voo
+  -> nao reservar carro
+```
+
+O objetivo e evitar que um servico fique bloqueando diretamente outro servico.
+
+Isso combina melhor com microsservicos, porque cada servico continua tendo sua propria responsabilidade.
+
+## Formas de implementar Saga
+
+Existem duas formas principais:
+
+1. Orquestracao
+2. Coreografia
+
+## Orquestracao
+
+Na orquestracao, existe um servico central chamado orquestrador.
+
+Ele sabe a ordem do processo e chama cada servico conforme a regra de negocio.
+
+Exemplo com pacote de viagem:
+
+```txt
+Cliente comprou pacote
+Orquestrador solicita voo
+Orquestrador solicita hotel
+Orquestrador solicita carro
+
+Voo: OK
+Hotel: erro
+Carro: nao solicitado
+
+Orquestrador solicita cancelamento do voo
+```
+
+Nesse modelo, o orquestrador controla o fluxo e registra o que aconteceu em cada etapa.
+
+## Coreografia
+
+Na coreografia, nao existe um servico central controlando tudo.
+
+A ideia e usar eventos e mensageria. Cada servico reage aos eventos que recebe e publica novos eventos quando termina sua parte.
+
+Exemplo:
+
+```txt
+Pedido criado
+  -> Servico de voo escuta o evento e reserva voo
+
+Voo reservado
+  -> Servico de hotel escuta o evento e tenta reservar hotel
+
+Hotel falhou
+  -> Servico de voo escuta o evento e cancela o voo
+```
+
+Nesse modelo, os servicos conversam indiretamente por eventos.
+
+Isso reduz acoplamento direto, mas pode deixar o fluxo mais dificil de rastrear se nao houver bons logs, rastreamento e observabilidade.
+
+---
+
 # Topicos para estudar depois
-
-## 2-Phase Commit
-
-Estudar como funciona o protocolo de confirmacao em duas fases para transacoes distribuidas.
-
-## Saga Pattern
-
-Estudar como coordenar operacoes distribuidas usando uma sequencia de acoes e compensacoes.
 
 ## ACID
 
@@ -262,4 +400,3 @@ Estudar separacao entre comandos de escrita e consultas de leitura.
 ## Trade-offs
 
 Estudar decisoes tecnicas e seus custos, como simplicidade vs escalabilidade, consistencia vs disponibilidade e monolito vs microsservicos.
-
