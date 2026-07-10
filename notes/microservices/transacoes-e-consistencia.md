@@ -1,6 +1,6 @@
 # Transacoes e consistencia
 
-Estas anotacoes organizam os estudos iniciais sobre deadlock, atomicidade e rollback.
+Estas anotacoes organizam os estudos iniciais sobre deadlock, atomicidade, rollback, transacoes distribuidas e consistencia.
 
 ## 1. Deadlock
 
@@ -374,16 +374,145 @@ Isso reduz acoplamento direto, mas pode deixar o fluxo mais dificil de rastrear 
 
 ---
 
+## 6. ACID
+
+ACID e um conjunto de propriedades que ajudam a garantir que transacoes em bancos relacionais sejam executadas com confiabilidade.
+
+A ideia e manter os dados integros mesmo quando acontecem falhas, concorrencia ou regras de negocio complexas.
+
+```txt
+A -> Atomicity   -> Atomicidade
+C -> Consistency -> Consistencia
+I -> Isolation   -> Isolamento
+D -> Durability  -> Durabilidade
+```
+
+## Atomicidade
+
+Atomicidade significa que uma transacao e indivisivel.
+
+Ou ela executa por completo, ou nenhuma alteracao deve ser aplicada.
+
+Se alguma etapa falhar, o banco desfaz o que ja foi feito usando `ROLLBACK`.
+
+Exemplo:
+
+```txt
+Transferencia bancaria:
+1. Debitar R$ 100 da Conta A
+2. Creditar R$ 100 na Conta B
+```
+
+Se o sistema debitar a Conta A, mas falhar antes de creditar a Conta B, a transacao inteira precisa ser cancelada.
+
+Resumo:
+
+```txt
+Tudo ou nada.
+```
+
+## Consistencia
+
+Consistencia significa que uma transacao deve levar o banco de um estado valido para outro estado valido.
+
+Ela precisa respeitar as regras definidas no banco e na aplicacao.
+
+Exemplos de regras:
+
+- `NOT NULL`;
+- `PRIMARY KEY`;
+- `FOREIGN KEY`;
+- `UNIQUE`;
+- `CHECK`;
+- triggers;
+- regras de negocio da aplicacao.
+
+Exemplos de problemas que nao devem ser permitidos:
+
+- estoque negativo;
+- idade menor que zero;
+- CPF duplicado;
+- pedido ligado a um cliente inexistente.
+
+Se alguma regra for violada, a transacao deve ser cancelada.
+
+Resumo:
+
+```txt
+Nenhuma regra de integridade deve ser quebrada.
+```
+
+## Isolamento
+
+Isolamento significa que transacoes executadas ao mesmo tempo nao devem interferir incorretamente umas nas outras.
+
+Cada transacao deve se comportar como se estivesse trabalhando sobre um estado consistente dos dados.
+
+Exemplo:
+
+```txt
+Saldo atual: R$ 1.000
+
+Usuario A faz saque de R$ 300
+Usuario B consulta o saldo ao mesmo tempo
+```
+
+Sem isolamento, o Usuario B poderia ver um saldo temporario de R$ 700 antes do saque ser confirmado.
+
+Se o saque falhar e sofrer `ROLLBACK`, o Usuario B teria visto uma informacao que nunca existiu oficialmente.
+
+Problemas que o isolamento ajuda a evitar:
+
+- Dirty Read: ler dados ainda nao confirmados;
+- Non-Repeatable Read: a mesma consulta retornar valores diferentes dentro da mesma transacao;
+- Phantom Read: novas linhas aparecerem entre duas consultas iguais;
+- Lost Update: uma atualizacao sobrescrever outra sem perceber.
+
+Resumo:
+
+```txt
+Transacoes concorrentes nao devem causar inconsistencias umas nas outras.
+```
+
+## Durabilidade
+
+Durabilidade significa que, depois do `COMMIT`, os dados confirmados nao devem ser perdidos.
+
+Mesmo que aconteca falha no sistema, o banco precisa manter o que ja foi confirmado.
+
+Exemplos de falhas:
+
+- queda de energia;
+- reinicializacao do servidor;
+- falha do sistema;
+- travamento da aplicacao.
+
+Mecanismos que ajudam nisso:
+
+- Write-Ahead Log (WAL);
+- Transaction Log;
+- Redo Log;
+- replicacao;
+- persistencia em disco.
+
+Exemplo:
+
+```txt
+Voce faz um PIX e recebe a confirmacao.
+
+Mesmo que o servidor desligue depois disso,
+a transferencia deve continuar registrada.
+```
+
+Resumo:
+
+```txt
+Depois do COMMIT, os dados nao devem ser perdidos.
+```
+
+---
+
 # Topicos para estudar depois
-
-## ACID
-
-Estudar as propriedades de transacoes em bancos de dados:
-
-- Atomicidade
-- Consistencia
-- Isolamento
-- Durabilidade
 
 ## Event Driven
 
