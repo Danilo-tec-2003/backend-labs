@@ -512,20 +512,242 @@ Depois do COMMIT, os dados nao devem ser perdidos.
 
 ---
 
-# Topicos para estudar depois
+## 7. Outbox Pattern
 
-## Event Driven
+Outbox Pattern e um padrao usado para publicar eventos de forma mais segura quando existe uma transacao no banco.
 
-Estudar sistemas baseados em eventos e comunicacao assincrona.
+A ideia e salvar a alteracao principal e o evento na mesma transacao local.
 
-## Event-Driven Architecture
+Depois, outro processo le esse evento da tabela de outbox e envia para a mensageria.
 
-Estudar arquitetura orientada a eventos, produtores, consumidores, filas e mensageria.
+Isso evita um problema comum:
 
-## CQRS
+```txt
+1. Pedido e salvo no banco
+2. Sistema tenta publicar evento PedidoCriado
+3. Broker esta fora do ar
+```
 
-Estudar separacao entre comandos de escrita e consultas de leitura.
+Sem Outbox, o pedido pode ficar salvo, mas o evento pode nao ser publicado.
 
-## Trade-offs
+Com Outbox, o evento fica registrado no banco e pode ser reenviado depois.
 
-Estudar decisoes tecnicas e seus custos, como simplicidade vs escalabilidade, consistencia vs disponibilidade e monolito vs microsservicos.
+## Exemplo simples
+
+```txt
+Transacao local:
+1. Salvar pedido
+2. Salvar evento PedidoCriado na tabela outbox
+3. COMMIT
+
+Processo assincrono:
+1. Busca eventos pendentes na outbox
+2. Publica no Kafka ou RabbitMQ
+3. Marca evento como enviado
+```
+
+Resumo:
+
+```txt
+Outbox ajuda a nao perder eventos importantes entre banco e mensageria.
+```
+
+---
+
+## 8. Event Driven
+
+Event Driven significa desenvolver pensando em eventos.
+
+Um evento representa algo que aconteceu no sistema.
+
+Exemplos:
+
+- pedido criado;
+- pagamento aprovado;
+- estoque reservado;
+- nota fiscal emitida;
+- entrega finalizada.
+
+Em vez de um servico chamar todos os outros diretamente, ele publica um evento.
+
+Outros servicos podem escutar esse evento e reagir.
+
+## Exemplo simples
+
+```txt
+Servico de pedidos publica:
+  -> PedidoCriado
+
+Servico de estoque escuta:
+  -> reserva produtos
+
+Servico de pagamento escuta:
+  -> inicia cobranca
+
+Servico de notificacao escuta:
+  -> envia e-mail ao cliente
+```
+
+Resumo:
+
+```txt
+Event Driven e sobre reagir ao que aconteceu no sistema.
+```
+
+---
+
+## 9. Event-Driven Architecture
+
+Event-Driven Architecture e uma forma de organizar sistemas usando eventos como principal meio de comunicacao.
+
+Os principais elementos sao:
+
+- produtor: servico que publica o evento;
+- consumidor: servico que escuta e processa o evento;
+- broker: ferramenta que transporta eventos, como Kafka ou RabbitMQ;
+- evento: mensagem que descreve algo que aconteceu.
+
+## Exemplo simples
+
+```txt
+Pedido Service
+  -> publica evento PedidoCriado
+
+Broker
+  -> recebe e distribui o evento
+
+Estoque Service
+  -> consome o evento e reserva estoque
+
+Pagamento Service
+  -> consome o evento e inicia pagamento
+```
+
+Esse modelo ajuda a reduzir acoplamento direto entre servicos.
+
+Mas tambem exige cuidado com:
+
+- logs;
+- rastreamento;
+- idempotencia;
+- ordem dos eventos;
+- reprocessamento;
+- monitoramento de falhas.
+
+Resumo:
+
+```txt
+Event-Driven Architecture organiza a comunicacao entre servicos usando eventos e mensageria.
+```
+
+---
+
+## 10. CQRS
+
+CQRS significa Command Query Responsibility Segregation.
+
+A ideia e separar operacoes de escrita das operacoes de leitura.
+
+```txt
+Command -> altera dados
+Query   -> consulta dados
+```
+
+Essa separacao pode ser simples, dentro da mesma aplicacao, ou mais avancada, usando bancos/modelos diferentes para escrita e leitura.
+
+## Exemplo simples
+
+Em um sistema de pedidos:
+
+```txt
+Command:
+  -> criar pedido
+  -> cancelar pedido
+  -> aprovar pagamento
+
+Query:
+  -> buscar pedido por id
+  -> listar pedidos do cliente
+  -> montar tela de acompanhamento
+```
+
+Com CQRS, a parte de escrita pode focar em regras de negocio e consistencia.
+
+A parte de leitura pode focar em performance e formato ideal para consulta.
+
+Resumo:
+
+```txt
+CQRS separa o que muda dados do que apenas consulta dados.
+```
+
+---
+
+## 11. Trade-offs
+
+Trade-off e uma decisao tecnica que traz ganhos, mas tambem custos.
+
+Em arquitetura, quase nunca existe escolha perfeita. Existe escolha mais adequada para o contexto.
+
+## Exemplos comuns
+
+```txt
+Monolito:
+  -> mais simples de desenvolver e publicar
+  -> pode ficar dificil de escalar times e modulos com o tempo
+
+Microsservicos:
+  -> mais independencia entre servicos
+  -> mais complexidade com rede, observabilidade, deploy e consistencia
+```
+
+```txt
+Consistencia forte:
+  -> dados mais previsiveis
+  -> pode reduzir disponibilidade e performance
+
+Consistencia eventual:
+  -> melhor para sistemas distribuidos e assincronos
+  -> exige cuidado para lidar com dados temporariamente diferentes
+```
+
+```txt
+Comunicacao sincronica:
+  -> resposta imediata
+  -> cria dependencia direta entre servicos
+
+Comunicacao assincrona:
+  -> reduz acoplamento e melhora resiliencia
+  -> aumenta complexidade de rastreamento e reprocessamento
+```
+
+Resumo:
+
+```txt
+Trade-off e entender o custo da escolha tecnica, nao apenas o beneficio.
+```
+
+---
+
+## Conclusao
+
+Esses conceitos ajudam a entender melhor os desafios de microsservicos e sistemas distribuidos.
+
+O ponto principal e que distribuir um sistema tambem distribui os problemas:
+
+- consistencia;
+- falhas de rede;
+- transacoes entre servicos;
+- mensagens duplicadas;
+- rastreamento;
+- reprocessamento;
+- observabilidade.
+
+Por isso, padroes como Saga, Outbox, Event-Driven Architecture e CQRS existem para lidar melhor com esses problemas.
+
+Resumo final:
+
+```txt
+Microsservicos nao eliminam complexidade.
+Eles mudam onde a complexidade aparece.
+```
