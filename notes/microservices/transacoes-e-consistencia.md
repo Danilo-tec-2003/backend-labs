@@ -226,6 +226,102 @@ Se o pagamento falhar, talvez seja necessario desfazer a baixa no estoque e canc
 
 Em bancos relacionais, isso pode ser feito dentro de uma transacao com `ROLLBACK`.
 
+## Rollback automatico e manual
+
+Em muitos frameworks, o rollback pode acontecer automaticamente quando uma excecao e lancada dentro de uma transacao.
+
+Exemplo em Spring:
+
+```java
+@Transactional
+public void finalizarCompra(Compra compra) {
+    criarPedido(compra);
+    reservarEstoque(compra);
+    processarPagamento(compra);
+}
+```
+
+Se `processarPagamento` lancar uma excecao, o Spring pode desfazer as alteracoes feitas no banco dentro dessa transacao.
+
+Mas tambem existe rollback manual, quando o codigo decide explicitamente que precisa cancelar a operacao.
+
+Exemplo conceitual:
+
+```txt
+BEGIN
+  criar pedido
+  reservar estoque
+
+  pagamento falhou
+
+ROLLBACK
+```
+
+## Limite importante do rollback
+
+Rollback de banco desfaz alteracoes feitas no banco.
+
+Ele nao desfaz automaticamente efeitos externos, como:
+
+- e-mail enviado;
+- chamada para API externa;
+- mensagem publicada em broker;
+- arquivo gerado;
+- pagamento capturado fora do sistema.
+
+Exemplo:
+
+```txt
+1. Salva pedido no banco
+2. Envia e-mail para o cliente
+3. Falha antes do COMMIT
+4. Banco faz ROLLBACK
+```
+
+Nesse caso, o pedido pode ser desfeito no banco, mas o e-mail ja foi enviado.
+
+Por isso, efeitos externos precisam de cuidado extra. Em muitos sistemas, e melhor publicar eventos depois do commit ou usar Outbox Pattern.
+
+## Rollback em microsservicos
+
+Em microsservicos, cada servico normalmente tem seu proprio banco.
+
+Isso significa que uma unica transacao de banco nao consegue desfazer tudo em todos os servicos.
+
+Exemplo:
+
+```txt
+Pedido Service:
+  -> criou pedido
+  -> COMMIT
+
+Estoque Service:
+  -> reservou estoque
+  -> COMMIT
+
+Pagamento Service:
+  -> pagamento falhou
+```
+
+O banco do Pedido Service nao esta na mesma transacao do banco do Estoque Service.
+
+Nesse caso, o sistema precisa de compensacao:
+
+```txt
+Pagamento falhou
+  -> cancelar pedido
+  -> liberar estoque reservado
+```
+
+Esse tipo de fluxo leva para o Saga Pattern.
+
+Resumo:
+
+```txt
+Rollback desfaz uma transacao local.
+Em sistemas distribuidos, muitas vezes e necessario compensar em vez de simplesmente dar rollback.
+```
+
 ---
 
 ## 4. Two-Phase Commit
@@ -284,6 +380,48 @@ Por isso, em muitos cenarios, outras abordagens sao preferidas:
 - Outbox Pattern;
 - Event-Driven Architecture;
 - mensageria com Kafka ou RabbitMQ.
+
+## Por que o 2PC pode ser problematico
+
+O 2PC tenta garantir consistencia forte entre participantes, mas cobra um preco alto.
+
+Principais problemas:
+
+- bloqueia recursos enquanto a decisao final nao chega;
+- depende muito do coordenador;
+- aumenta acoplamento entre servicos;
+- fica sensivel a falhas de rede;
+- pode reduzir performance e disponibilidade.
+
+Exemplo:
+
+```txt
+Pagamento respondeu SIM
+Estoque respondeu SIM
+Pedido respondeu SIM
+
+Coordenador caiu antes de mandar COMMIT
+```
+
+Os participantes podem ficar presos esperando a decisao final.
+
+## Quando pode fazer sentido
+
+2PC pode fazer sentido quando:
+
+- os participantes suportam transacoes distribuidas;
+- o volume nao e muito alto;
+- consistencia forte e obrigatoria;
+- o custo de bloquear recursos e aceitavel;
+- o ambiente e mais controlado.
+
+Em microsservicos independentes, normalmente esse custo e alto demais.
+
+Resumo:
+
+```txt
+2PC busca atomicidade distribuida, mas aumenta bloqueio, acoplamento e risco operacional.
+```
 
 ---
 
@@ -371,6 +509,87 @@ Hotel falhou
 Nesse modelo, os servicos conversam indiretamente por eventos.
 
 Isso reduz acoplamento direto, mas pode deixar o fluxo mais dificil de rastrear se nao houver bons logs, rastreamento e observabilidade.
+
+## Transacoes compensatorias
+
+Uma Saga nao tenta voltar no tempo como um rollback de banco.
+
+Ela executa uma nova acao para compensar uma etapa que ja foi confirmada.
+
+Exemplos:
+
+```txt
+Acao feita:
+  -> reservar estoque
+
+Compensacao:
+  -> liberar estoque
+```
+
+```txt
+Acao feita:
+  -> criar pedido
+
+Compensacao:
+  -> cancelar pedido
+```
+
+```txt
+Acao feita:
+  -> capturar pagamento
+
+Compensacao:
+  -> estornar pagamento
+```
+
+A compensacao precisa ser pensada como parte da regra de negocio.
+
+Nem toda operacao tem uma compensacao perfeita. Um e-mail enviado, por exemplo, nao pode ser "desenviado".
+
+## Cuidados importantes em Saga
+
+Saga precisa lidar bem com falhas parciais.
+
+Cuidados comuns:
+
+- salvar o estado da Saga;
+- registrar qual etapa ja foi concluida;
+- permitir retry de etapas que falharam;
+- garantir idempotencia nas operacoes;
+- tratar mensagens duplicadas;
+- definir timeout para etapas demoradas;
+- criar logs e rastreamento com correlation id.
+
+Idempotencia significa que repetir a mesma operacao nao deve gerar efeito duplicado.
+
+Exemplo:
+
+```txt
+Mensagem: cancelar pedido 123
+
+Primeira execucao:
+  -> pedido cancelado
+
+Segunda execucao da mesma mensagem:
+  -> sistema percebe que o pedido ja esta cancelado
+  -> nao cancela duas vezes
+```
+
+## Quando usar Saga
+
+Saga costuma fazer sentido quando:
+
+- uma regra de negocio atravessa varios servicos;
+- cada servico tem seu proprio banco;
+- nao vale a pena usar 2PC;
+- consistencia eventual e aceitavel;
+- existe forma de compensar etapas ja concluidas.
+
+Resumo:
+
+```txt
+Saga troca rollback global por transacoes locais e compensacoes controladas.
+```
 
 ---
 
@@ -510,6 +729,82 @@ Resumo:
 Depois do COMMIT, os dados nao devem ser perdidos.
 ```
 
+## Niveis de isolamento
+
+O isolamento pode ser configurado em niveis diferentes.
+
+Quanto mais forte o isolamento, maior a protecao contra problemas de concorrencia. Mas tambem pode haver mais bloqueio e menor performance.
+
+Exemplos comuns:
+
+```txt
+Read Uncommitted:
+  -> pode ler dados ainda nao confirmados
+  -> risco de Dirty Read
+
+Read Committed:
+  -> le apenas dados confirmados
+  -> evita Dirty Read
+
+Repeatable Read:
+  -> a mesma leitura tende a continuar igual dentro da transacao
+  -> evita Non-Repeatable Read
+
+Serializable:
+  -> tenta executar como se as transacoes fossem uma por vez
+  -> maior consistencia, mas pode custar mais performance
+```
+
+Na pratica, o nivel ideal depende do tipo de sistema.
+
+Exemplo:
+
+```txt
+Relatorio simples:
+  -> pode aceitar um isolamento menor
+
+Operacao financeira:
+  -> geralmente precisa de isolamento mais forte
+```
+
+## ACID em microsservicos
+
+ACID funciona muito bem dentro de uma transacao local.
+
+Exemplo:
+
+```txt
+Pedido Service
+  -> banco de pedidos
+  -> transacao local ACID
+```
+
+O problema aparece quando a regra de negocio atravessa varios servicos.
+
+Exemplo:
+
+```txt
+Pedido Service
+  -> banco de pedidos
+
+Estoque Service
+  -> banco de estoque
+
+Pagamento Service
+  -> banco de pagamentos
+```
+
+Cada servico pode ter ACID no seu proprio banco, mas o processo completo nao esta automaticamente dentro de uma unica transacao ACID.
+
+Por isso entram padroes como Saga, Outbox e mensageria.
+
+Resumo:
+
+```txt
+ACID protege bem a transacao local.
+Em microsservicos, a consistencia do fluxo inteiro precisa de desenho arquitetural.
+```
+
 ---
 
 ## 7. Outbox Pattern
@@ -545,6 +840,81 @@ Processo assincrono:
 2. Publica no Kafka ou RabbitMQ
 3. Marca evento como enviado
 ```
+
+## Estrutura comum de uma tabela outbox
+
+Uma tabela de outbox costuma guardar informacoes suficientes para publicar e reprocessar o evento.
+
+Exemplo:
+
+```txt
+outbox_event
+  -> id
+  -> aggregate_id
+  -> event_type
+  -> payload
+  -> status
+  -> created_at
+  -> published_at
+  -> attempts
+  -> last_error
+```
+
+Campos importantes:
+
+- `id`: identifica o evento;
+- `aggregate_id`: identifica o recurso principal, como pedido ou pagamento;
+- `event_type`: diz o tipo do evento, como `PedidoCriado`;
+- `payload`: conteudo que sera publicado;
+- `status`: pendente, enviado ou erro;
+- `attempts`: quantidade de tentativas de publicacao;
+- `last_error`: ultima falha registrada.
+
+## Publicador da outbox
+
+O publicador e um processo separado que le eventos pendentes e envia para o broker.
+
+Exemplo de fluxo:
+
+```txt
+1. Buscar eventos com status PENDENTE
+2. Publicar evento no broker
+3. Se publicar com sucesso, marcar como ENVIADO
+4. Se falhar, manter como PENDENTE ou marcar como ERRO
+5. Tentar novamente depois
+```
+
+Esse processo pode ser:
+
+- um job agendado;
+- um worker separado;
+- uma thread da propria aplicacao;
+- um conector de CDC, como Debezium.
+
+## Cuidados importantes no Outbox
+
+Outbox melhora a confiabilidade, mas nao remove toda complexidade.
+
+Cuidados comuns:
+
+- o consumidor precisa ser idempotente;
+- eventos podem ser publicados mais de uma vez;
+- a tabela de outbox precisa de limpeza ou arquivamento;
+- falhas precisam gerar alerta;
+- eventos antigos nao podem ficar presos sem monitoramento;
+- a ordem dos eventos pode importar em alguns fluxos.
+
+Exemplo de duplicidade:
+
+```txt
+1. Publicador envia PedidoCriado
+2. Broker recebe o evento
+3. Aplicacao falha antes de marcar como ENVIADO
+4. Publicador tenta de novo
+5. Consumidor recebe PedidoCriado novamente
+```
+
+Por isso, o consumidor deve conseguir perceber que aquele evento ja foi processado.
 
 Resumo:
 
@@ -588,10 +958,69 @@ Servico de notificacao escuta:
   -> envia e-mail ao cliente
 ```
 
+## Evento nao e comando
+
+Um evento descreve algo que ja aconteceu.
+
+Um comando pede para algo acontecer.
+
+Exemplo:
+
+```txt
+Comando:
+  -> CriarPedido
+  -> ReservarEstoque
+  -> CobrarPagamento
+
+Evento:
+  -> PedidoCriado
+  -> EstoqueReservado
+  -> PagamentoAprovado
+```
+
+Essa diferenca e importante.
+
+Se a mensagem esta mandando um servico fazer algo, ela se parece mais com comando.
+
+Se a mensagem esta avisando que algo ja aconteceu, ela se parece mais com evento.
+
+## Nomeando eventos
+
+Eventos devem ser nomeados no passado, porque representam fatos.
+
+Exemplos bons:
+
+- `PedidoCriado`;
+- `PagamentoAprovado`;
+- `EstoqueReservado`;
+- `NotaFiscalEmitida`.
+
+Exemplos menos claros:
+
+- `CriarPedido`;
+- `ProcessarPagamento`;
+- `ReservarEstoque`.
+
+Esses nomes parecem comandos, nao eventos.
+
+## Cuidados em sistemas orientados a eventos
+
+Ao usar eventos, o sistema precisa lidar com:
+
+- entrega duplicada;
+- atraso na entrega;
+- consumidor fora do ar;
+- mudanca de contrato do evento;
+- ordem de processamento;
+- rastreamento de ponta a ponta;
+- reprocessamento.
+
 Resumo:
 
 ```txt
 Event Driven e sobre reagir ao que aconteceu no sistema.
+Evento e fato ocorrido.
+Comando e pedido de acao.
 ```
 
 ---
@@ -634,10 +1063,86 @@ Mas tambem exige cuidado com:
 - reprocessamento;
 - monitoramento de falhas.
 
+## Fluxo com broker
+
+O broker fica no meio da comunicacao.
+
+Ele recebe eventos dos produtores e entrega para os consumidores.
+
+Exemplo:
+
+```txt
+Pedido Service
+  -> publica PedidoCriado
+
+Kafka/RabbitMQ
+  -> armazena ou roteia a mensagem
+
+Estoque Service
+  -> consome PedidoCriado
+  -> publica EstoqueReservado
+
+Pagamento Service
+  -> consome EstoqueReservado
+  -> publica PagamentoAprovado
+```
+
+O produtor nao precisa conhecer diretamente todos os consumidores.
+
+Isso reduz acoplamento direto, mas aumenta a necessidade de observabilidade.
+
+## Consistencia eventual
+
+Em Event-Driven Architecture, muitas vezes os dados nao ficam consistentes imediatamente em todos os servicos.
+
+Exemplo:
+
+```txt
+Pedido criado agora
+  -> tela mostra pedido como "aguardando estoque"
+
+Alguns segundos depois:
+  -> Estoque Service processa evento
+  -> pedido muda para "estoque reservado"
+
+Depois:
+  -> Pagamento Service aprova pagamento
+  -> pedido muda para "pago"
+```
+
+Durante alguns segundos, cada servico pode estar em um ponto diferente do processo.
+
+Isso se chama consistencia eventual.
+
+## Observabilidade
+
+Arquitetura orientada a eventos precisa de boa visibilidade.
+
+E importante conseguir responder:
+
+- quem publicou o evento;
+- quando publicou;
+- quem consumiu;
+- se houve erro;
+- quantas tentativas foram feitas;
+- qual fluxo de negocio aquele evento pertence;
+- em qual etapa o processo esta parado.
+
+Ferramentas e praticas uteis:
+
+- logs estruturados;
+- correlation id;
+- tracing distribuido;
+- metricas de fila;
+- dashboards;
+- alertas;
+- dead letter queue.
+
 Resumo:
 
 ```txt
 Event-Driven Architecture organiza a comunicacao entre servicos usando eventos e mensageria.
+EDA reduz acoplamento direto, mas exige controle forte sobre eventos, falhas e observabilidade.
 ```
 
 ---
@@ -675,10 +1180,95 @@ Com CQRS, a parte de escrita pode focar em regras de negocio e consistencia.
 
 A parte de leitura pode focar em performance e formato ideal para consulta.
 
+## Modelo de escrita e modelo de leitura
+
+No modelo de escrita, o foco e validar comandos e proteger regras de negocio.
+
+Exemplo:
+
+```txt
+Command Model:
+  -> validar se o cliente pode comprar
+  -> validar estoque
+  -> aplicar regra de desconto
+  -> criar pedido
+```
+
+No modelo de leitura, o foco e responder consultas de forma rapida e simples.
+
+Exemplo:
+
+```txt
+Read Model:
+  -> tela de pedidos do cliente
+  -> historico de pagamentos
+  -> painel administrativo
+  -> relatorio de entregas
+```
+
+O read model pode ser montado a partir de eventos.
+
+Exemplo:
+
+```txt
+PedidoCriado
+  -> atualiza tabela pedido_resumo
+
+PagamentoAprovado
+  -> atualiza status no pedido_resumo
+
+EntregaFinalizada
+  -> atualiza data de entrega no pedido_resumo
+```
+
+## CQRS simples x CQRS avancado
+
+CQRS nao precisa sempre significar varios bancos ou varios servicos.
+
+Pode ser simples:
+
+```txt
+Mesma aplicacao
+Mesmo banco
+Classes separadas para comandos e consultas
+```
+
+Ou pode ser avancado:
+
+```txt
+Banco de escrita separado
+Banco de leitura separado
+Eventos atualizando projecoes
+Consistencia eventual entre escrita e leitura
+```
+
+Comecar simples costuma ser melhor.
+
+## Quando CQRS pode ajudar
+
+CQRS pode ajudar quando:
+
+- consultas sao muito diferentes das escritas;
+- telas precisam de dados ja agregados;
+- leitura tem muito mais volume que escrita;
+- regras de escrita sao complexas;
+- existe necessidade de escalar leitura separadamente;
+- eventos ja fazem parte da arquitetura.
+
+## Quando CQRS pode ser exagero
+
+CQRS pode ser exagero quando:
+
+- o sistema e simples;
+- CRUD comum resolve bem;
+- o time ainda nao tem maturidade com eventos;
+- a consistencia eventual atrapalha mais do que ajuda;
+- o custo operacional nao compensa.
+
 Resumo:
 
 ```txt
-CQRS separa o que muda dados do que apenas consulta dados.
+CQRS separa o que muda dados do que apenas consulta dados, mas deve ser usado quando a separacao realmente paga o custo.
 ```
 
 ---
@@ -721,10 +1311,56 @@ Comunicacao assincrona:
   -> aumenta complexidade de rastreamento e reprocessamento
 ```
 
+```txt
+2PC:
+  -> busca consistencia forte entre participantes
+  -> pode bloquear recursos e acoplar servicos
+
+Saga:
+  -> combina melhor com servicos independentes
+  -> exige compensacoes, idempotencia e observabilidade
+```
+
+```txt
+CRUD simples:
+  -> menor complexidade
+  -> pode ficar limitado para leituras muito especificas
+
+CQRS:
+  -> melhora separacao entre escrita e leitura
+  -> adiciona sincronizacao, eventos e consistencia eventual
+```
+
+## Como avaliar trade-offs
+
+Antes de escolher um padrao, vale perguntar:
+
+- o problema existe agora ou e hipotetico?
+- qual falha o padrao evita?
+- qual complexidade ele adiciona?
+- o time consegue operar isso em producao?
+- como o sistema sera monitorado?
+- como recuperar mensagens, transacoes ou estados com erro?
+- a regra exige consistencia forte ou aceita consistencia eventual?
+
+Exemplo:
+
+```txt
+Se o sistema e pequeno:
+  -> monolito modular pode ser melhor
+
+Se o dominio ja exige independencia real:
+  -> microsservicos podem fazer sentido
+
+Se o fluxo cruza varios servicos:
+  -> Saga e Outbox podem ser necessarios
+```
+
 Resumo:
 
 ```txt
 Trade-off e entender o custo da escolha tecnica, nao apenas o beneficio.
+Arquitetura boa e escolha consciente para um contexto especifico.
 ```
 
 ---
